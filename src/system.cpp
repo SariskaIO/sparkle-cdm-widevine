@@ -467,7 +467,11 @@ struct Host final : Host_10 {
       const char* error_message, uint32_t error_message_size
   ) final {
     string message(error_message, error_message_size);
-    auto errname = strerrorname_np(system_code);
+    #ifdef __GLIBC__
+      auto errname = strerrorname_np(system_code);
+    #else
+      auto errname = strerror(system_code);
+    #endif
     LOG(
         "%u: exception=%d, code=%u, errname=`%s' message=`%s'",
         promise_id,
