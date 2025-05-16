@@ -184,6 +184,20 @@ static gchar* find_chrome_widevine_cdm() {
   g_free(chrome_base);
   return NULL;
 }
+#else
+static gchar* find_chrome_widevine_cdm() {
+  // Look for Chrome's Widevine CDM on Linux
+  if (g_file_test("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so", G_FILE_TEST_EXISTS)) {
+    return g_strdup("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
+  }
+  
+  // Also check common alternative locations
+  if (g_file_test("/usr/lib/chromium/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so", G_FILE_TEST_EXISTS)) {
+    return g_strdup("/usr/lib/chromium/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
+  }
+  
+  return NULL;
+}
 #endif
 
 static void do_init(bool& success) {
@@ -212,10 +226,19 @@ static void do_init(bool& success) {
     g_autofree gchar *ff_home = firefox_dir();
     g_autofree gchar *chr_home = chromium_dir();
     
-    if (find_firefox_cdm(ff_home, &cdm_path, nullptr, nullptr)) {
+    // Try to find CDM in Chrome first (most reliable)
+    cdm_path = find_chrome_widevine_cdm();
+    if (cdm_path) {
+      GST_LOG("found chrome cdm@%s", cdm_path);
+      mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    }
+    // Then try Firefox
+    else if (find_firefox_cdm(ff_home, &cdm_path, nullptr, nullptr)) {
       GST_LOG("found firefox cdm@%s", cdm_path);
       mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
-    } else if (find_chromium_cdm(chr_home, &cdm_path, nullptr, nullptr)) {
+    } 
+    // Then Chromium
+    else if (find_chromium_cdm(chr_home, &cdm_path, nullptr, nullptr)) {
       GST_LOG("found chromium cdm@%s", cdm_path);
       mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
     }
@@ -227,7 +250,7 @@ static void do_init(bool& success) {
 #ifdef __APPLE__
     mod = g_module_open("libwidevinecdm.dylib", GModuleFlags::G_MODULE_BIND_LAZY);
 #else
-    mod = g_module_open("libwidevinecdm", GModuleFlags::G_MODULE_BIND_LAZY);
+    mod = g_module_open("libwidevinecdm.so", GModuleFlags::G_MODULE_BIND_LAZY);
 #endif
   }
 
