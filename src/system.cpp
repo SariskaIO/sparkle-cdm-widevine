@@ -120,33 +120,6 @@ static gchar *chromium_dir() {
   return g_build_filename (g_get_user_config_dir(), "chromium", NULL);
 }
 
-static bool find_chrome_cdm(gchar **cdm_path, gchar **version, gchar **arch) {
-  g_return_val_if_fail(cdm_path != NULL, FALSE);
-
-  // Direct path to Chrome Widevine CDM in system install
-  g_autofree gchar *lib_path = g_strdup("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
-  
-  GST_INFO("Checking for Chrome Widevine CDM at: %s", lib_path);
-  
-  if (g_file_test(lib_path, G_FILE_TEST_IS_REGULAR)) {
-    GST_INFO("Found Chrome Widevine CDM at: %s", lib_path);
-    *cdm_path = g_strdup(lib_path);
-    
-    if (version != NULL) {
-      *version = g_strdup("system");
-    }
-    
-    if (arch != NULL) {
-      *arch = g_strdup("linux_x64");
-    }
-    
-    return TRUE;
-  }
-  
-  GST_INFO("Chrome Widevine CDM not found at: %s", lib_path);
-  return FALSE;
-}
-
 static gchar *chrome_system_dir() {
   return g_strdup("/opt/google/chrome");
 }
