@@ -121,6 +121,30 @@ walk_chrome (GFile *cwd, GFile **cdm_path, GCancellable *cancellable, GError **e
 }
 
 gboolean
+find_chrome_cdm (const gchar *root, gchar **cdm_path, GCancellable *cancellable, GError **error)
+{
+  g_return_val_if_fail (root != NULL, FALSE);
+  g_return_val_if_fail (cdm_path != NULL, FALSE);
+
+  g_debug ("Searching for Chrome CDM in %s", root);
+  
+  g_autoptr(GFile) cdm_path_file = NULL;
+  g_autoptr(GFile) root_file = g_file_new_for_path (root);
+  
+  if (!walk_chrome (root_file, &cdm_path_file, cancellable, error)) {
+    return FALSE;
+  }
+  
+  if (cdm_path_file != NULL) {
+    *cdm_path = g_file_get_path (cdm_path_file);
+    g_debug ("Found Chrome CDM at %s", *cdm_path);
+    return TRUE;
+  }
+  
+  return FALSE;
+}
+
+gboolean
 find_firefox_cdm (const gchar *root, gchar **cdm_path, GCancellable *cancellable, GError **error)
 {
   g_autoptr(GFile) cdm_path_file = NULL;
