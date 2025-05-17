@@ -82,6 +82,44 @@ walk_firefox (GFile *cwd, guint depth, guint max_depth, GFile **cdm_path, GCance
   return FALSE;
 }
 
+static gboolean
+walk_chrome (GFile *cwd, GFile **cdm_path, GCancellable *cancellable, GError **error)
+{
+  if (g_cancellable_is_cancelled (cancellable)) {
+    return FALSE;
+  }
+  
+  // Direct path for Chrome is /opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so
+  g_autoptr(GFile) widevine_dir = g_file_get_child (cwd, "WidevineCdm");
+  if (!g_file_query_exists (widevine_dir, cancellable)) {
+    g_debug ("Chrome WidevineCdm directory not found at %s", g_file_get_path (widevine_dir));
+    return FALSE;
+  }
+
+  g_autoptr(GFile) platform_specific_dir = g_file_get_child (widevine_dir, "_platform_specific");
+  if (!g_file_query_exists (platform_specific_dir, cancellable)) {
+    g_debug ("Chrome _platform_specific directory not found at %s", g_file_get_path (platform_specific_dir));
+    return FALSE;
+  }
+
+  g_autoptr(GFile) linux_x64_dir = g_file_get_child (platform_specific_dir, "linux_x64");
+  if (!g_file_query_exists (linux_x64_dir, cancellable)) {
+    g_debug ("Chrome linux_x64 directory not found at %s", g_file_get_path (linux_x64_dir));
+    return FALSE;
+  }
+
+  g_autoptr(GFile) cdm_blob = g_file_get_child (linux_x64_dir, CDM_BLOB);
+  if (!g_file_query_exists (cdm_blob, cancellable)) {
+    g_debug ("Chrome CDM blob not found at %s", g_file_get_path (cdm_blob));
+    return FALSE;
+  }
+
+  // Found the CDM
+  g_debug ("Found Chrome CDM at %s", g_file_get_path (cdm_blob));
+  *cdm_path = g_object_ref (cdm_blob);
+  return TRUE;
+}
+
 gboolean
 find_firefox_cdm (const gchar *root, gchar **cdm_path, GCancellable *cancellable, GError **error)
 {

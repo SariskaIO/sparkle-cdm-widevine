@@ -120,29 +120,79 @@ static gchar *chromium_dir() {
   return g_build_filename (g_get_user_config_dir(), "chromium", NULL);
 }
 
+static bool find_chrome_cdm(gchar **cdm_path, gchar **version, gchar **arch) {
+  g_return_val_if_fail(cdm_path != NULL, FALSE);
+
+  // Direct path to Chrome Widevine CDM in system install
+  g_autofree gchar *lib_path = g_strdup("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
+  
+  GST_INFO("Checking for Chrome Widevine CDM at: %s", lib_path);
+  
+  if (g_file_test(lib_path, G_FILE_TEST_IS_REGULAR)) {
+    GST_INFO("Found Chrome Widevine CDM at: %s", lib_path);
+    *cdm_path = g_strdup(lib_path);
+    
+    if (version != NULL) {
+      *version = g_strdup("system");
+    }
+    
+    if (arch != NULL) {
+      *arch = g_strdup("linux_x64");
+    }
+    
+    return TRUE;
+  }
+  
+  GST_INFO("Chrome Widevine CDM not found at: %s", lib_path);
+  return FALSE;
+}
+
+static gchar *chrome_system_dir() {
+  return g_strdup("/opt/google/chrome");
+}
+
 static void do_init(bool& success) {
   GST_DEBUG_CATEGORY_INIT(sparkle_widevine_debug_cat, "sprklcdm-widevine", 0,
       "Sparkle CDM Widevine");
 
+  GST_INFO("Initializing Widevine CDM");
+
   g_autofree gchar *cdm_path = nullptr;
   g_autofree gchar *ff_home = firefox_dir();
   g_autofree gchar *chr_home = chromium_dir();
-  const gchar *widevine_cdm_blob = widevine_cdm_blob_env ();
-  if (g_file_test (widevine_cdm_blob, G_FILE_TEST_EXISTS)) {
-    GST_LOG("using env@%s", widevine_cdm_blob);
+  const gchar *chrome_home = "/opt/google/chrome";
+  const gchar *widevine_cdm_blob = widevine_cdm_blob_env();
+  
+  GST_INFO("Checking for Widevine CDM in various locations");
+  GST_INFO("Environment variable: %s", widevine_cdm_blob ? widevine_cdm_blob : "not set");
+  GST_INFO("Firefox dir: %s", ff_home);
+  GST_INFO("Chromium dir: %s", chr_home);
+  GST_INFO("Chrome system dir: %s", chrome_home);
+  
+  if (widevine_cdm_blob && g_file_test(widevine_cdm_blob, G_FILE_TEST_EXISTS)) {
+    GST_INFO("Using Widevine CDM from environment variable: %s", widevine_cdm_blob);
     mod = g_module_open(widevine_cdm_blob, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from env: %s", mod ? "success" : "failed");
   } else if (find_firefox_cdm(ff_home, &cdm_path, nullptr, nullptr)) {
-    GST_LOG("found firefox cdm@%s", cdm_path);
+    GST_INFO("Found Firefox CDM: %s", cdm_path);
     mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Firefox: %s", mod ? "success" : "failed");
+  } else if (find_chrome_cdm(chrome_home, &cdm_path, nullptr, nullptr)) {
+    GST_INFO("Found Chrome system CDM: %s", cdm_path);
+    mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Chrome: %s", mod ? "success" : "failed");
   } else if (find_chromium_cdm(chr_home, &cdm_path, nullptr, nullptr)) {
-    GST_LOG("found chromium cdm@%s", cdm_path);
+    GST_INFO("Found Chromium CDM: %s", cdm_path);
     mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Chromium: %s", mod ? "success" : "failed");
   } else {
-    GST_ERROR("no cdm");
+    GST_ERROR("No CDM found in any location, falling back to system library");
     mod = g_module_open("libwidevinecdm", GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Fallback module opened: %s", mod ? "success" : "failed");
   }
 
   success = mod && initialize_cdm(mod);
+  GST_INFO("CDM initialization %s", success ? "successful" : "failed");
 }
 
 static bool do_init_once() {
