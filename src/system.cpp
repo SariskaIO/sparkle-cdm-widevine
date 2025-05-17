@@ -759,19 +759,21 @@ OpenCDMError OpenCDMSystem::constructSession(
 ) {
   InitDataType initDataType;
   if (!initDataTypeFromString(initDataTypeName, initDataType)) {
+    g_print("ERROR: Invalid init data type: %s\n", initDataTypeName.c_str());
     return ERROR_INVALID_ARG;
   }
 
   auto initialized = host->cdmInitializedFuture;
   if (initialized.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-    LOG("%p: initializing cdm", cdm);
+    g_print("Initializing Widevine CDM for the first time\n");
     cdm->Initialize(false, false, false);
   }
   if (!initialized.get()) {
-    LOG("%p: CDM failed to initialize", cdm);
+    g_print("ERROR: CDM failed to initialize\n");
     return ERROR_FAIL;
   }
 
+  g_print("Creating session with init data type: %s\n", initDataTypeName.c_str());
   auto promiseId = nextPromiseId();
   auto sessionType = sessionTypeFromLicenseType(licenseType);
   auto request = CreateSessionRequest {
@@ -790,11 +792,13 @@ OpenCDMError OpenCDMSystem::constructSession(
   auto response = future.get();
   auto error = response.error();
   if (error) {
+    g_print("ERROR: Failed to create session: %s\n", error->message.c_str());
     return error->openCdmError();
   }
   auto newSession = response.session().value();
   sessions[newSession->id] = newSession;
   session = newSession.get();
+  g_print("Successfully created session with ID: %s\n", newSession->id.c_str());
   return ERROR_NONE;
 }
 
@@ -1060,9 +1064,14 @@ OpenCDMError opencdm_is_type_supported(
 ) {
   UNUSED(mimeType);
   string systemId(keySystem);
-  if (systemId == widevineId || systemId == widevineUUID) {
+  g_print("opencdm_is_type_supported called with key system: '%s'\n", keySystem);
+  // Check for Widevine key system support
+  if (systemId == widevineId || systemId == widevineUUID || 
+      systemId == "com.widevine.alpha" || systemId == "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed") {
+    g_print("Key system '%s' is SUPPORTED\n", keySystem);
     return ERROR_NONE;
   } else {
+    g_print("Key system '%s' is NOT supported\n", keySystem);
     return ERROR_KEYSYSTEM_NOT_SUPPORTED;
   }
 }
