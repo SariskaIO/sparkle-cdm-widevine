@@ -113,162 +113,64 @@ static const gchar *widevine_cdm_blob_env() {
 }
 
 static gchar *firefox_dir() {
-#ifdef __APPLE__
-  return g_build_filename(g_get_home_dir(), "Library", "Application Support", "Firefox", NULL);
-#else
   return g_build_filename(g_get_home_dir(), ".mozilla", "firefox", NULL);
-#endif
 }
 
 static gchar *chromium_dir() {
-#ifdef __APPLE__
-  // Try both Chrome and Chromium paths on macOS
-  gchar *chrome_path = g_build_filename(g_get_home_dir(), "Library", "Application Support", "Google", "Chrome", NULL);
-  if (g_file_test(chrome_path, G_FILE_TEST_IS_DIR)) {
-    return chrome_path;
-  }
-  g_free(chrome_path);
-  return g_build_filename(g_get_home_dir(), "Library", "Application Support", "Chromium", NULL);
-#else
-  return g_build_filename(g_get_user_config_dir(), "chromium", NULL);
-#endif
+  return g_build_filename (g_get_user_config_dir(), "chromium", NULL);
 }
 
-#ifdef __APPLE__
-static gchar* find_chrome_widevine_cdm() {
-  const gchar* arch;
-#ifdef __aarch64__
-  arch = "mac_arm64";
-#else
-  arch = "mac_x64";
-#endif
-  
-  // Look for Chrome's Widevine CDM
-  gchar *chrome_base = g_strdup("/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework");
-  gchar *versions_dir = g_build_filename(chrome_base, "Versions", NULL);
-  
-  GDir *dir = g_dir_open(versions_dir, 0, NULL);
-  if (dir) {
-    const gchar *version;
-    const gchar *latest_version = NULL;
-    
-    // Find the latest version
-    while ((version = g_dir_read_name(dir))) {
-      if (g_regex_match_simple("^\\d+\\.\\d+\\.\\d+\\.\\d+$", version, (GRegexCompileFlags)0, (GRegexMatchFlags)0)) {
-        if (!latest_version || g_strcmp0(version, latest_version) > 0) {
-          latest_version = version;
-        }
-      }
-    }
-    
-    if (latest_version) {
-      gchar *widevine_path = g_build_filename(chrome_base, "Versions", latest_version, 
-                                             "Libraries", "WidevineCdm", "_platform_specific", 
-                                             arch, "libwidevinecdm.dylib", NULL);
-      
-      if (g_file_test(widevine_path, G_FILE_TEST_EXISTS)) {
-        GST_LOG("Found Chrome CDM at: %s", widevine_path);
-        g_dir_close(dir);
-        g_free(versions_dir);
-        g_free(chrome_base);
-        return widevine_path;
-      }
-      
-      g_free(widevine_path);
-    }
-    
-    g_dir_close(dir);
-  }
-  
-  g_free(versions_dir);
-  g_free(chrome_base);
-  return NULL;
+static gchar *chrome_system_dir() {
+  return g_strdup("/opt/google/chrome");
 }
-#else
-static gchar* find_chrome_widevine_cdm() {
-  // Look for Chrome's Widevine CDM on Linux
-  if (g_file_test("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so", G_FILE_TEST_EXISTS)) {
-    return g_strdup("/opt/google/chrome/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
-  }
-  
-  // Also check common alternative locations
-  if (g_file_test("/usr/lib/chromium/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so", G_FILE_TEST_EXISTS)) {
-    return g_strdup("/usr/lib/chromium/WidevineCdm/_platform_specific/linux_x64/libwidevinecdm.so");
-  }
-  
-  return NULL;
-}
-#endif
 
 static void do_init(bool& success) {
   GST_DEBUG_CATEGORY_INIT(sparkle_widevine_debug_cat, "sprklcdm-widevine", 0,
       "Sparkle CDM Widevine");
 
+  GST_INFO("Initializing Widevine CDM");
+
   g_autofree gchar *cdm_path = nullptr;
+  g_autofree gchar *ff_home = firefox_dir();
+  g_autofree gchar *chr_home = chromium_dir();
+  const gchar *chrome_home = "/opt/google/chrome";
   const gchar *widevine_cdm_blob = widevine_cdm_blob_env();
   
-  if (widevine_cdm_blob && g_file_test(widevine_cdm_blob, G_FILE_TEST_EXISTS)) {
-    GST_LOG("using env@%s", widevine_cdm_blob);
-    mod = g_module_open(widevine_cdm_blob, GModuleFlags::G_MODULE_BIND_LAZY);
-  } 
-#ifdef __APPLE__
-  else {
-    // On macOS, try to find Widevine in Chrome
-    cdm_path = find_chrome_widevine_cdm();
-    if (cdm_path) {
-      GST_LOG("found Chrome CDM@%s", cdm_path);
-      mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
-    }
-  }
-#else
-  else {
-    // Linux paths
-    g_autofree gchar *ff_home = firefox_dir();
-    g_autofree gchar *chr_home = chromium_dir();
-    
-    // Try to find CDM in Chrome first (most reliable)
-    cdm_path = find_chrome_widevine_cdm();
-    if (cdm_path) {
-      GST_LOG("found chrome cdm@%s", cdm_path);
-      mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
-    }
-    // Then try Firefox
-    else if (find_firefox_cdm(ff_home, &cdm_path, nullptr, nullptr)) {
-      GST_LOG("found firefox cdm@%s", cdm_path);
-      mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
-    } 
-    // Then Chromium
-    else if (find_chromium_cdm(chr_home, &cdm_path, nullptr, nullptr)) {
-      GST_LOG("found chromium cdm@%s", cdm_path);
-      mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
-    }
-  }
-#endif
+  GST_INFO("Checking for Widevine CDM in various locations");
+  GST_INFO("Environment variable: %s", widevine_cdm_blob ? widevine_cdm_blob : "not set");
+  GST_INFO("Firefox dir: %s", ff_home);
+  GST_INFO("Chromium dir: %s", chr_home);
+  GST_INFO("Chrome system dir: %s", chrome_home);
   
-  if (!mod) {
-    GST_ERROR("no cdm found, trying fallback");
-#ifdef __APPLE__
-    mod = g_module_open("libwidevinecdm.dylib", GModuleFlags::G_MODULE_BIND_LAZY);
-#else
-    mod = g_module_open("libwidevinecdm.so", GModuleFlags::G_MODULE_BIND_LAZY);
-#endif
+  if (widevine_cdm_blob && g_file_test(widevine_cdm_blob, G_FILE_TEST_EXISTS)) {
+    GST_INFO("Using Widevine CDM from environment variable: %s", widevine_cdm_blob);
+    mod = g_module_open(widevine_cdm_blob, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from env: %s", mod ? "success" : "failed");
+  } else if (find_firefox_cdm(ff_home, &cdm_path, nullptr, nullptr)) {
+    GST_INFO("Found Firefox CDM: %s", cdm_path);
+    mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Firefox: %s", mod ? "success" : "failed");
+  } else if (find_chrome_cdm(chrome_home, &cdm_path, nullptr, nullptr)) {
+    GST_INFO("Found Chrome system CDM: %s", cdm_path);
+    mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Chrome: %s", mod ? "success" : "failed");
+  } else if (find_chromium_cdm(chr_home, &cdm_path, nullptr, nullptr)) {
+    GST_INFO("Found Chromium CDM: %s", cdm_path);
+    mod = g_module_open(cdm_path, GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Module opened from Chromium: %s", mod ? "success" : "failed");
+  } else {
+    GST_ERROR("No CDM found in any location, falling back to system library");
+    mod = g_module_open("libwidevinecdm", GModuleFlags::G_MODULE_BIND_LAZY);
+    GST_INFO("Fallback module opened: %s", mod ? "success" : "failed");
   }
 
   success = mod && initialize_cdm(mod);
-  
-  if (!success) {
-    if (mod) {
-      const gchar *error = g_module_error();
-      GST_ERROR("Failed to initialize CDM: %s", error ? error : "unknown error");
-    } else {
-      GST_ERROR("Failed to open CDM module");
-    }
-  }
+  GST_INFO("CDM initialization %s", success ? "successful" : "failed");
 }
 
 static bool do_init_once() {
   static bool success = false;
-  static std::once_flag init_flag;
+  std::once_flag init_flag;
   std::call_once(init_flag, []() { do_init(success); });
   return success;
 }
@@ -398,6 +300,7 @@ struct CreateSessionRequest {
 
 struct CreateSessionResponse : variant<shared_ptr<OpenCDMSession>, RejectedPromise> {
   optional<shared_ptr<OpenCDMSession>> session() {
+    return *std::get_if<shared_ptr<OpenCDMSession>>(this);
     if (std::holds_alternative<shared_ptr<OpenCDMSession>>(*this)) {
       return std::get<shared_ptr<OpenCDMSession>>(*this);
     } else {
@@ -428,6 +331,7 @@ struct SetServerCertificateResponse : variant<monostate, RejectedPromise> {
 };
 
 struct Host final : Host_10 {
+
   GstClock *clock;
   OpenCDMSystem *system;
   promise<bool> cdmInitialized;
@@ -518,6 +422,8 @@ struct Host final : Host_10 {
     cdmInitialized.set_value(success);
   }
 
+  // Called by the CDM when a key status is available in response to
+  // GetStatusForPolicy().
   void OnResolveKeyStatusPromise(
       uint32_t promise_id,
       cdm::KeyStatus key_status
@@ -584,11 +490,7 @@ struct Host final : Host_10 {
       const char* error_message, uint32_t error_message_size
   ) final {
     string message(error_message, error_message_size);
-    #ifdef __GLIBC__
-      auto errname = strerrorname_np(system_code);
-    #else
-      auto errname = strerror(system_code);
-    #endif
+    auto errname = strerrorname_np(system_code);
     LOG(
         "%u: exception=%d, code=%u, errname=`%s' message=`%s'",
         promise_id,
@@ -722,12 +624,22 @@ struct Host final : Host_10 {
     }
   }
 
+  // Called by the CDM when session |session_id| is closed. Size
+  // parameter should not include null termination.
   void OnSessionClosed(const char* session_id, uint32_t session_id_size) final {
     string sessionId(session_id, session_id_size);
     LOG("%s", sessionId.c_str());
     sessions.erase(sessionId);
   }
 
+  // The following are optional methods that may not be implemented on all
+  // platforms.
+
+  // Sends a platform challenge for the given |service_id|. |challenge| is at
+  // most 256 bits of data to be signed. Once the challenge has been completed,
+  // the host will call ContentDecryptionModule::OnPlatformChallengeResponse()
+  // with the signed challenge response and platform certificate. Size
+  // parameters should not include null termination.
   void SendPlatformChallenge(
       const char* service_id,
       uint32_t service_id_size,
@@ -739,23 +651,42 @@ struct Host final : Host_10 {
     LOG("%s", serviceId.c_str());
   }
 
+  // Attempts to enable output protection (e.g. HDCP) on the display link. The
+  // |desired_protection_mask| is a bit mask of OutputProtectionMethods. No
+  // status callback is issued, the CDM must call QueryOutputProtectionStatus()
+  // periodically to ensure the desired protections are applied.
   void EnableOutputProtection(uint32_t desired_protection_mask) final {
     LOG("%u", desired_protection_mask);
   }
 
+  // Requests the current output protection status. Once the host has the status
+  // it will call ContentDecryptionModule::OnQueryOutputProtectionStatus().
   void QueryOutputProtectionStatus() final {
     system->cdm->OnQueryOutputProtectionStatus(cdm::QueryResult::kQuerySucceeded, 0, 0);
   }
 
+  // Must be called by the CDM if it returned kDeferredInitialization during
+  // InitializeAudioDecoder() or InitializeVideoDecoder().
   void OnDeferredInitializationDone(StreamType stream_type, Status decoder_status) final {
     LOG("%u, %u", stream_type, decoder_status);
   }
 
+  // Creates a FileIO object from the host to do file IO operation. Returns NULL
+  // if a FileIO object cannot be obtained. Once a valid FileIO object is
+  // returned, |client| must be valid until FileIO::Close() is called. The
+  // CDM can call this method multiple times to operate on different files.
   FileIO* CreateFileIO(FileIOClient* client) final {
     LOG("%p", client);
     return nullptr;
   }
 
+  // Requests a specific version of the storage ID. A storage ID is a stable,
+  // device specific ID used by the CDM to securely store persistent data. The
+  // ID will be returned by the host via ContentDecryptionModule::OnStorageId().
+  // If |version| is 0, the latest version will be returned. All |version|s
+  // that are greater than or equal to 0x80000000 are reserved for the CDM and
+  // should not be supported or returned by the host. The CDM must not expose
+  // the ID outside the client device, even in encrypted form.
   void RequestStorageId(uint32_t version) final {
     LOG("%u", version);
     string id("test");
@@ -828,19 +759,21 @@ OpenCDMError OpenCDMSystem::constructSession(
 ) {
   InitDataType initDataType;
   if (!initDataTypeFromString(initDataTypeName, initDataType)) {
+    g_print("ERROR: Invalid init data type: %s\n", initDataTypeName.c_str());
     return ERROR_INVALID_ARG;
   }
 
   auto initialized = host->cdmInitializedFuture;
   if (initialized.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-    LOG("%p: initializing cdm", cdm);
+    g_print("Initializing Widevine CDM for the first time\n");
     cdm->Initialize(false, false, false);
   }
   if (!initialized.get()) {
-    LOG("%p: CDM failed to initialize", cdm);
+    g_print("ERROR: CDM failed to initialize\n");
     return ERROR_FAIL;
   }
 
+  g_print("Creating session with init data type: %s\n", initDataTypeName.c_str());
   auto promiseId = nextPromiseId();
   auto sessionType = sessionTypeFromLicenseType(licenseType);
   auto request = CreateSessionRequest {
@@ -859,11 +792,13 @@ OpenCDMError OpenCDMSystem::constructSession(
   auto response = future.get();
   auto error = response.error();
   if (error) {
+    g_print("ERROR: Failed to create session: %s\n", error->message.c_str());
     return error->openCdmError();
   }
   auto newSession = response.session().value();
   sessions[newSession->id] = newSession;
   session = newSession.get();
+  g_print("Successfully created session with ID: %s\n", newSession->id.c_str());
   return ERROR_NONE;
 }
 
@@ -1129,9 +1064,14 @@ OpenCDMError opencdm_is_type_supported(
 ) {
   UNUSED(mimeType);
   string systemId(keySystem);
-  if (systemId == widevineId || systemId == widevineUUID) {
+  g_print("opencdm_is_type_supported called with key system: '%s'\n", keySystem);
+  // Check for Widevine key system support
+  if (systemId == widevineId || systemId == widevineUUID || 
+      systemId == "com.widevine.alpha" || systemId == "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed") {
+    g_print("Key system '%s' is SUPPORTED\n", keySystem);
     return ERROR_NONE;
   } else {
+    g_print("Key system '%s' is NOT supported\n", keySystem);
     return ERROR_KEYSYSTEM_NOT_SUPPORTED;
   }
 }
